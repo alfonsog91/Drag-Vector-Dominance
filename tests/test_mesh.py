@@ -118,9 +118,9 @@ def _timing_summary(samples):
 
 def test_frequency_32_icosphere_topology(icosphere32):
     graph = icosphere32
-    triangles = 20 * 32**2
-    assert graph.n == 10 * triangles + 2 == 10_242
-    assert graph.m == 30 * triangles == 30_720
+    triangle_frequency = 32**2
+    assert graph.n == 10 * triangle_frequency + 2 == 10_242
+    assert graph.m == 30 * triangle_frequency == 30_720
     assert np.all(graph.tails < graph.heads)
     edges = np.column_stack((graph.tails, graph.heads))
     assert np.unique(edges, axis=0).shape[0] == graph.m
