@@ -4,7 +4,12 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.linalg import solve
+from scipy.sparse import coo_matrix, diags, issparse
 from scipy.sparse.csgraph import connected_components
+from scipy.sparse.linalg import spsolve
+
+
+_DENSE_GRAPH_ELEMENTS = 1_000_000
 
 
 class Graph:
@@ -21,12 +26,22 @@ class Graph:
         self.n = n
         self.tails, self.heads = (v.astype(int) for v in arrays)
         self.m = len(self.tails)
-        self.B = np.zeros((n, self.m))
-        np.add.at(self.B, (self.tails, np.arange(self.m)), -1)
-        np.add.at(self.B, (self.heads, np.arange(self.m)), 1)
+        if n * self.m + n * n > _DENSE_GRAPH_ELEMENTS:
+            columns = np.arange(self.m)
+            self.B = coo_matrix(
+                (np.concatenate((-np.ones(self.m), np.ones(self.m))),
+                 (np.concatenate((self.tails, self.heads)),
+                  np.concatenate((columns, columns)))),
+                shape=(n, self.m),
+            ).tocsr()
+            self.B.eliminate_zeros()
+        else:
+            self.B = np.zeros((n, self.m))
+            np.add.at(self.B, (self.tails, np.arange(self.m)), -1)
+            np.add.at(self.B, (self.heads, np.arange(self.m)), 1)
         self.L = self.B @ self.B.T
-        _, labels = connected_components(np.abs(self.B) @ np.abs(self.B).T,
-                                         directed=False)
+        adjacency = np.abs(self.B) @ np.abs(self.B.T)
+        _, labels = connected_components(adjacency, directed=False)
         self.components = [np.flatnonzero(labels == k) for k in np.unique(labels)]
 
 
@@ -47,8 +62,12 @@ def _grounded_solve(graph, matrix, rhs):
     for nodes in graph.components:
         free = nodes[1:]
         if free.size:
-            potential[free] = solve(matrix[np.ix_(free, free)], rhs[free],
-                                    assume_a="pos")
+            if issparse(matrix):
+                reduced = matrix[free, :][:, free]
+                potential[free] = spsolve(reduced, rhs[free])
+            else:
+                potential[free] = solve(matrix[np.ix_(free, free)], rhs[free],
+                                        assume_a="pos")
     return potential
 
 
@@ -93,7 +112,10 @@ def solve_flow(graph, supply, a=1.0, b=0.0, c=0.0, tol=1e-10, max_iter=100):
     for iteration in range(max_iter + 1):
         gradient = a * x + b * x**3 + projected_c
         inverse_hessian = 1 / (a + 3 * b * x**2)
-        laplacian = (graph.B * inverse_hessian) @ graph.B.T
+        if issparse(graph.B):
+            laplacian = graph.B @ diags(inverse_hessian) @ graph.B.T
+        else:
+            laplacian = (graph.B * inverse_hessian) @ graph.B.T
         potential = _grounded_solve(graph, laplacian,
                                     graph.B @ (inverse_hessian * gradient))
         residual = gradient - graph.B.T @ potential

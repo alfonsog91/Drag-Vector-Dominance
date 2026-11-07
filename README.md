@@ -81,16 +81,23 @@ Mass, inertia, thrust and lever arm are constant; aerodynamic forces are absent.
 
 ```python
 from aerotvc.graph import Graph, nozzle_supply, solve_flow
+from aerotvc.ledger import AeroResult
 
 graph = Graph(4, [0, 1, 0, 2], [1, 3, 2, 3])
 supply = nozzle_supply(graph, 0, 3, result.mdot)
-flow = solve_flow(graph, supply, a=[0.5, 0.5, 2, 2])
-print(flow.x, flow.energy)
+coefficients = [0.5, 0.5, 2, 2]
+flow = solve_flow(graph, supply, a=coefficients)
+accounting = AeroResult.from_solution(
+    graph, supply, flow, a=coefficients)
+print(flow.x, accounting.label, accounting.energy_initial,
+      accounting.energy_final, accounting.reduction_pct)
 ```
 
-`Graph(n, tails, heads)` exposes dense incidence `B` and Laplacian `L=BB.T`.
-An edge has -1 at its tail and +1 at its head, so `B.T@phi` is head minus
-tail potential. Signed flows may run against the stored orientation.
+`Graph(n, tails, heads)` exposes incidence `B` and Laplacian `L=BB.T`, using
+dense arrays for small graphs and CSR sparse matrices when the combined dense
+matrices would exceed one million elements. An edge has -1 at its tail and +1
+at its head, so `B.T@phi` is head minus tail potential. Signed flows may run
+against the stored orientation.
 `nozzle_supply(graph, source, sink, mdot)` gives -mdot at source and +mdot
 at sink. `solve_flow(graph, supply, a=1, b=0, c=0, tol=1e-10, max_iter=100)`
 minimizes `sum(a*x²/2 + b*x⁴/4 + c*x)` subject to `B@x=supply`.
@@ -99,6 +106,16 @@ in every connected component, including isolated nodes. Newton steps use
 grounded weighted Laplacians per component and Armijo backtracking.
 Nonconvergence raises `RuntimeError`, not a silently accepted partial result.
 The result exposes `x`, `energy`, and `iterations`.
+
+`AeroResult.from_solution(...)` wraps a flow result with the energy of the
+minimum-norm feasible start, final energy, reduction percentage, and iteration
+count. Its label is exactly **model energy reduction**. These are abstract
+model-cost quantities, not real drag measurements or reduction claims.
+
+`aerotvc.mesh.icosphere(frequency=32)` builds an edge graph by subdividing and
+projecting an icosahedron onto the unit sphere. With `T=frequency²`, it has
+`10T+2` nodes and `30T` edges; at frequency 32 that is 10,242 nodes and 30,720
+edges. Twelve nodes have degree 5 and all remaining nodes have degree 6.
 
 These abstract costs are not a physical aerodynamic drag law. Quadratic flows
 scale linearly with mass flow, while their cost scales quadratically.
