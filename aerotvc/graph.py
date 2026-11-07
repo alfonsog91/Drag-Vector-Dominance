@@ -81,29 +81,34 @@ def solve_flow(graph, supply, a=1.0, b=0.0, c=0.0, tol=1e-10, max_iter=100):
     if not np.isfinite(tol) or tol <= 0 or max_iter < 1:
         raise ValueError("tol and max_iter must be positive")
 
-    def energy(x):
-        return float(np.sum(a * x**2 / 2 + b * x**4 / 4 + c * x))
+    def energy(x, linear=c):
+        return float(np.sum(a * x**2 / 2 + b * x**4 / 4 + linear * x))
 
     x = graph.B.T @ _grounded_solve(graph, graph.L, s)
     if not graph.m:
         return FlowResult(x, 0.0, 0)
-    for iteration in range(max_iter):
-        gradient = a * x + b * x**3 + c
+    # Node-potential costs are constant on feasible flows; remove them from
+    # both the gradient and line search to avoid large gauge-dependent terms.
+    projected_c = c - graph.B.T @ _grounded_solve(graph, graph.L, graph.B @ c)
+    for iteration in range(max_iter + 1):
+        gradient = a * x + b * x**3 + projected_c
         inverse_hessian = 1 / (a + 3 * b * x**2)
         laplacian = (graph.B * inverse_hessian) @ graph.B.T
         potential = _grounded_solve(graph, laplacian,
                                     graph.B @ (inverse_hessian * gradient))
         residual = gradient - graph.B.T @ potential
-        if np.linalg.norm(residual, ord=np.inf) <= tol * (
-                1 + np.linalg.norm(gradient, ord=np.inf)):
-            return FlowResult(x, energy(x), iteration)
         direction = -inverse_hessian * residual
+        if np.linalg.norm(direction, ord=np.inf) <= tol * (
+                1 + np.linalg.norm(x, ord=np.inf)):
+            return FlowResult(x, energy(x), iteration)
+        if iteration == max_iter:
+            break
         slope = gradient @ direction
-        current = energy(x)
+        current = energy(x, projected_c)
         step = 1.0
         for _ in range(60):
             trial = x + step * direction
-            if energy(trial) <= current + 1e-4 * step * slope:
+            if energy(trial, projected_c) <= current + 1e-4 * step * slope:
                 x = trial
                 break
             step /= 2
