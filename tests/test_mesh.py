@@ -70,7 +70,7 @@ def _independent_projected_gradient(graph, supply, a, b):
 
         current_energy = _energy(x, a, b)
         slope = float(gradient @ direction)
-        step = 1.0
+        step = 0.5
         for _ in range(50):
             candidate = x + step * direction
             if _energy(candidate, a, b) <= (
